@@ -4,7 +4,8 @@ import {
   X, ChevronRight, Clock, AlertCircle, CheckCircle2, Trash2, Building2,
   KeyRound, Eye, EyeOff, TrendingUp, FileStack, Trophy, Award, MessageCircle,
   Send, Tag as TagIcon, CalendarClock, Paperclip, Wallet, Upload, Settings, Mail,
-  MoreVertical, Pencil, XCircle, ArrowLeftRight, History
+  MoreVertical, Pencil, XCircle, ArrowLeftRight, History, Home, Calendar, CalendarDays,
+  ArrowUpDown, ChevronLeft
 } from "lucide-react";
 
 /* ---------------------------------------------------------
@@ -13,7 +14,7 @@ import {
    running at API_BASE.
 --------------------------------------------------------- */
 
-const API_BASE = "https://keyzo-server.onrender.com/api";
+const API_BASE = "http://localhost:4000/api";
 
 const STATUS = [
   { id: "new", label: "New", color: "#5B8DEF" },
@@ -234,6 +235,7 @@ function BackendDashboard({ me, token, users, leads, settings, loading, setUsers
   const [tab, setTab] = useState("overview");
   const [showAddLead, setShowAddLead] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showDistribute, setShowDistribute] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [activeLead, setActiveLead] = useState(null);
@@ -279,6 +281,32 @@ function BackendDashboard({ me, token, users, leads, settings, loading, setUsers
     } catch (e) { notify(e.message, "err"); }
   };
 
+  const distributeExisting = async (assignments) => {
+    // assignments: [{ username, count }]
+    const pool = leads.filter((l) => !l.removed && !l.assignedTo);
+    let cursor = 0;
+    const updates = [];
+    for (const { username, count } of assignments) {
+      const chunk = pool.slice(cursor, cursor + count);
+      cursor += count;
+      chunk.forEach((lead) => updates.push({ lead, username }));
+    }
+    try {
+      const results = await Promise.all(
+        updates.map(({ lead, username }) =>
+          api(`/leads/${lead.id}`, {
+            method: "PATCH", token,
+            body: { assignedTo: username, history: [...(lead.history || []), { at: Date.now(), by: me.name, action: `Assigned to ${username} (bulk distribute)` }] },
+          })
+        )
+      );
+      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+      setLeads(leads.map((l) => byId[l.id] || l));
+      setShowDistribute(false);
+      notify(`${updates.length} leads distribute ho gaye`);
+    } catch (e) { notify(e.message, "err"); }
+  };
+
   const assignLead = async (leadId, username) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
@@ -313,6 +341,14 @@ function BackendDashboard({ me, token, users, leads, settings, loading, setUsers
     } catch (e) { notify(e.message, "err"); }
   };
 
+  const resetAgentPassword = async (userId, newPassword) => {
+    try {
+      await api(`/users/${userId}`, { method: "PATCH", token, body: { password: newPassword } });
+      setUsers(users.map((x) => (x.id === userId ? { ...x, password: newPassword } : x)));
+      notify("Password update ho gaya");
+    } catch (e) { notify(e.message, "err"); }
+  };
+
   const NAV = [
     { id: "overview", label: "Overview", icon: <TrendingUp size={isMobile ? 20 : 16} /> },
     { id: "leads", label: "Leads", icon: <LayoutGrid size={isMobile ? 20 : 16} /> },
@@ -334,6 +370,7 @@ function BackendDashboard({ me, token, users, leads, settings, loading, setUsers
               tab === "leads" ? (
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="k-btn" style={{ ...S.ctaBtn, background: "#fff", color: T.ink, border: `1.5px solid ${T.hairline}` }} onClick={() => setShowImport(true)}><Upload size={15} /> Import</button>
+                  <button className="k-btn" style={{ ...S.ctaBtn, background: "#fff", color: T.ink, border: `1.5px solid ${T.hairline}` }} onClick={() => setShowDistribute(true)}><ArrowLeftRight size={15} /> Distribute</button>
                   <button className="k-btn" style={S.ctaBtn} onClick={() => setShowAddLead(true)}><Plus size={15} /> New Lead</button>
                 </div>
               ) : tab === "team" ? (
@@ -353,6 +390,7 @@ function BackendDashboard({ me, token, users, leads, settings, loading, setUsers
             {isMobile && (
               <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                 <button className="k-btn" style={{ ...S.ctaBtn, flex: 1, justifyContent: "center", background: "#fff", color: T.ink, border: `1.5px solid ${T.hairline}` }} onClick={() => setShowImport(true)}><Upload size={15} /> Import</button>
+                <button className="k-btn" style={{ ...S.ctaBtn, flex: 1, justifyContent: "center", background: "#fff", color: T.ink, border: `1.5px solid ${T.hairline}` }} onClick={() => setShowDistribute(true)}><ArrowLeftRight size={15} /> Distribute</button>
               </div>
             )}
             <FilterBar q={q} setQ={setQ} filterStatus={filterStatus} setFilterStatus={setFilterStatus} filterAgent={filterAgent} setFilterAgent={setFilterAgent} agents={agents} isMobile={isMobile} />
@@ -366,7 +404,7 @@ function BackendDashboard({ me, token, users, leads, settings, loading, setUsers
             {isMobile && (
               <button className="k-btn" style={{ ...S.ctaBtn, width: "100%", justifyContent: "center", marginBottom: 14, background: "#fff", color: T.ink, border: `1.5px solid ${T.hairline}` }} onClick={() => setShowTemplate(true)}><Settings size={15} /> WhatsApp Template</button>
             )}
-            <TeamPanel agents={agents} onToggle={toggleAgentActive} leads={liveLeads} isMobile={isMobile} />
+            <TeamPanel agents={agents} onToggle={toggleAgentActive} onResetPassword={resetAgentPassword} leads={liveLeads} isMobile={isMobile} />
           </>
         )}
         {tab === "removed" && <RemovedTable leads={removedLeads} isMobile={isMobile} />}
@@ -376,6 +414,7 @@ function BackendDashboard({ me, token, users, leads, settings, loading, setUsers
 
       {showAddLead && <LeadFormModal agents={agents} onClose={() => setShowAddLead(false)} onSubmit={addLead} isMobile={isMobile} />}
       {showImport && <BulkImportModal agents={agents} onClose={() => setShowImport(false)} onSubmit={bulkImport} isMobile={isMobile} />}
+      {showDistribute && <DistributeModal agents={agents} unassignedCount={liveLeads.filter((l) => !l.assignedTo).length} onClose={() => setShowDistribute(false)} onSubmit={distributeExisting} isMobile={isMobile} />}
       {showAddUser && <UserFormModal onClose={() => setShowAddUser(false)} onSubmit={addUser} isMobile={isMobile} />}
       {showTemplate && <TemplateModal template={settings.waTemplate} onClose={() => setShowTemplate(false)} onSave={saveTemplate} isMobile={isMobile} />}
       {activeLead && (
@@ -548,7 +587,8 @@ function RemovedTable({ leads, isMobile }) {
   );
 }
 
-function TeamPanel({ agents, onToggle, leads, isMobile }) {
+function TeamPanel({ agents, onToggle, onResetPassword, leads, isMobile }) {
+  const [resetFor, setResetFor] = useState(null);
   if (agents.length === 0) return <EmptyState text="No calling-team logins yet. Create one to get started." />;
   return (
     <div style={S.tableWrap}>
@@ -557,19 +597,56 @@ function TeamPanel({ agents, onToggle, leads, isMobile }) {
         return (
           <div key={a.id} style={{ ...S.leadRow, cursor: "default", alignItems: "center" }}>
             <div style={S.avatarCircle}>{a.name.slice(0, 1).toUpperCase()}</div>
-            <div style={{ flex: 1, minWidth: 0 }}><div style={S.leadName}>{a.name}</div><div style={S.leadPhone}>@{a.username} · {count} leads · joined {fmtDate(a.createdAt)}</div></div>
-            <button className="k-btn" style={{ ...S.smallBtn, borderColor: a.active === false ? T.success : T.danger, color: a.active === false ? T.success : T.danger }} onClick={() => onToggle(a.id)}>{a.active === false ? "Activate" : "Pause"}</button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={S.leadName}>{a.name}</div>
+              <div style={S.leadPhone}>{count} leads · joined {fmtDate(a.createdAt)}</div>
+              <div style={S.credRow}>
+                <span style={S.credChip}>👤 {a.username}</span>
+                <span style={S.credChip}>🔑 {a.password || "—"}</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <button className="k-btn" style={{ ...S.smallBtn, borderColor: T.hairline, color: T.muted }} onClick={() => setResetFor(a)}>Reset Password</button>
+              <button className="k-btn" style={{ ...S.smallBtn, borderColor: a.active === false ? T.success : T.danger, color: a.active === false ? T.success : T.danger }} onClick={() => onToggle(a.id)}>{a.active === false ? "Activate" : "Pause"}</button>
+            </div>
           </div>
         );
       })}
+      {resetFor && <ResetPasswordModal agent={resetFor} onClose={() => setResetFor(null)} isMobile={isMobile} onReset={(pwd) => { onResetPassword(resetFor.id, pwd); setResetFor(null); }} />}
     </div>
   );
 }
 
+function ResetPasswordModal({ agent, onClose, onReset, isMobile }) {
+  const [pwd, setPwd] = useState("");
+  const valid = pwd.trim().length >= 4;
+  return (
+    <ModalShell title={`Reset Password — ${agent.name}`} onClose={onClose} isMobile={isMobile}>
+      <Field label="New password"><input style={S.input} value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder="4+ characters" /></Field>
+      <button disabled={!valid} className="k-btn" style={{ ...S.primaryBtn, opacity: valid ? 1 : 0.4 }} onClick={() => onReset(pwd.trim())}>Update Password</button>
+    </ModalShell>
+  );
+}
+
 /* ---------------- CALLING DASHBOARD ---------------- */
+function isToday(ts) {
+  if (!ts) return false;
+  const d = new Date(ts), n = new Date();
+  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+}
+function sortLeads(list, sortKey) {
+  const arr = [...list];
+  if (sortKey === "name") arr.sort((a, b) => a.name.localeCompare(b.name));
+  else if (sortKey === "reminder") arr.sort((a, b) => (a.nextActivity?.at || Infinity) - (b.nextActivity?.at || Infinity));
+  else arr.sort((a, b) => b.createdAt - a.createdAt); // newest
+  return arr;
+}
+
 function CallingDashboard({ me, token, leads, settings, loading, setLeads, onLogout, notify, isMobile }) {
+  const [tab, setTab] = useState("home");
   const [activeLead, setActiveLead] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
+  const [sortKey, setSortKey] = useState("newest");
   const [q, setQ] = useState("");
   const [agents, setAgents] = useState([]);
 
@@ -578,16 +655,28 @@ function CallingDashboard({ me, token, leads, settings, loading, setLeads, onLog
   }, [token]);
 
   const mine = leads.filter((l) => !l.removed);
-  const filtered = mine.filter((l) => {
-    if (filterStatus !== "all" && l.status !== filterStatus) return false;
-    if (q) {
-      const hay = `${l.name} ${l.phone} ${l.project} ${(l.tags || []).join(" ")} ${(l.notes || []).map((n) => n.text).join(" ")}`.toLowerCase();
-      if (!hay.includes(q.toLowerCase())) return false;
-    }
-    return true;
-  });
+  const closed = leads.filter((l) => l.removed || l.status === "converted");
+  const todayLeads = mine.filter((l) => isToday(l.nextActivity?.at));
+  const overdueLeads = mine.filter(isOverdue);
+  const wonLeads = mine.filter((l) => l.status === "converted");
+  const openLeads = mine;
+
+  const applyFilters = (list) => {
+    let out = list.filter((l) => {
+      if (filterStatus !== "all" && l.status !== filterStatus) return false;
+      if (q) {
+        const hay = `${l.name} ${l.phone} ${l.project} ${(l.tags || []).join(" ")} ${(l.notes || []).map((n) => n.text).join(" ")}`.toLowerCase();
+        if (!hay.includes(q.toLowerCase())) return false;
+      }
+      return true;
+    });
+    return sortLeads(out, sortKey);
+  };
+
+  const listFor = { today: todayLeads, open: openLeads, overdue: overdueLeads, won: wonLeads }[tab];
+  const filtered = listFor ? applyFilters(listFor) : [];
   const todayFollowups = mine.filter((l) => l.status === "followup").length;
-  const overdueCount = mine.filter(isOverdue).length;
+  const overdueCount = overdueLeads.length;
 
   const updateLead = async (leadId, patch) => {
     try {
@@ -608,56 +697,177 @@ function CallingDashboard({ me, token, leads, settings, loading, setLeads, onLog
     const history = [...(lead.history || []), { at: Date.now(), by: me.name, action: `Removed — "${reason}"` }];
     try {
       await api(`/leads/${leadId}`, { method: "PATCH", token, body: { removed: true, removedBy: me.username, removedByName: me.name, removedAt: Date.now(), removeReason: reason, history } });
-      setLeads(leads.filter((l) => l.id !== leadId));
+      setLeads(leads.map((l) => (l.id === leadId ? { ...l, removed: true } : l)));
       setActiveLead(null);
       notify("Lead removed — backend has the record");
     } catch (e) { notify(e.message, "err"); }
   };
 
-  const NAV = [{ id: "mine", label: "My Leads", icon: <LayoutGrid size={isMobile ? 20 : 16} /> }];
+  const NAV = [
+    { id: "today", label: "Today", icon: <CalendarDays size={isMobile ? 20 : 16} /> },
+    { id: "open", label: "Open", icon: <LayoutGrid size={isMobile ? 20 : 16} /> },
+    { id: "overdue", label: "Overdue", icon: <AlertCircle size={isMobile ? 20 : 16} /> },
+    { id: "won", label: "Won", icon: <Trophy size={isMobile ? 20 : 16} /> },
+    { id: "calendar", label: "Calendar", icon: <Calendar size={isMobile ? 20 : 16} /> },
+  ];
+  const titleFor = { home: "Home", today: "Today's Leads", open: "Open Leads", overdue: "Overdue", won: "Won Leads", calendar: "Calendar" }[tab];
 
   return (
     <div style={isMobile ? S.dashGridMobile : S.dashGrid}>
-      {!isMobile && <Sidebar me={me} tab="mine" setTab={() => {}} onLogout={onLogout} role="Calling Desk" items={NAV} />}
-      {isMobile && <MobileHeader title="My Leads" onLogout={onLogout} />}
+      {!isMobile && <Sidebar me={me} tab={tab} setTab={setTab} onLogout={onLogout} role="Calling Desk" items={NAV} onLogoClick={() => setTab("home")} />}
+      {isMobile && <MobileHeader title={titleFor} onLogout={onLogout} onTitleClick={() => setTab("home")} />}
 
       <main style={isMobile ? S.mainMobile : S.main}>
-        {!isMobile && <TopBar title="My Leads" right={
-          <div style={{ display: "flex", gap: 8 }}>
-            {overdueCount > 0 && <span style={{ ...S.followupBadge, background: "#FDEBEA", color: "#B4231B", border: "1.5px solid #F6C6C2" }}><AlertCircle size={13} /> {overdueCount} overdue</span>}
-            <span style={S.followupBadge}><Clock size={13} /> {todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""}</span>
-          </div>
-        } />}
-        {isMobile && (todayFollowups > 0 || overdueCount > 0) && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-            {overdueCount > 0 && <div style={{ ...S.followupBadgeMobile, background: "#FDEBEA", color: "#B4231B", border: "1.5px solid #F6C6C2" }}><AlertCircle size={13} /> {overdueCount} overdue</div>}
-            {todayFollowups > 0 && <div style={S.followupBadgeMobile}><Clock size={13} /> {todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""}</div>}
-          </div>
-        )}
-
-        <FilterBar q={q} setQ={setQ} filterStatus={filterStatus} setFilterStatus={setFilterStatus} filterAgent="all" setFilterAgent={() => {}} agents={[]} isMobile={isMobile} />
-
-        {filtered.length === 0 ? (
-          loading ? <SkeletonCards /> : <EmptyState text="No leads assigned yet, or nothing matches your filter." />
+        {tab === "home" ? (
+          <HomeScreen me={me} mine={mine} todayLeads={todayLeads} closed={closed} onGo={setTab} />
+        ) : tab === "calendar" ? (
+          <CalendarPanel leads={mine} onOpen={setActiveLead} isMobile={isMobile} />
         ) : (
-          <div style={isMobile ? S.cardGridMobile : S.cardGrid}>
-            {filtered.map((l, i) => (
-              <LeadCardOD
-                key={l.id} lead={l} index={i} me={me} agents={agents} waTemplate={settings.waTemplate}
-                onOpen={() => setActiveLead(l)}
-                onPatch={(patch) => updateLead(l.id, patch)}
-                onGoNext={() => goNextAfter(l.id)}
-                isLast={i === filtered.length - 1}
-              />
-            ))}
-          </div>
+          <>
+            {!isMobile && <TopBar title={titleFor} right={
+              <div style={{ display: "flex", gap: 8 }}>
+                {overdueCount > 0 && <span style={{ ...S.followupBadge, background: "#FDEBEA", color: "#B4231B", border: "1.5px solid #F6C6C2" }}><AlertCircle size={13} /> {overdueCount} overdue</span>}
+                <span style={S.followupBadge}><Clock size={13} /> {todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""}</span>
+              </div>
+            } />}
+
+            <FilterSortBar q={q} setQ={setQ} filterStatus={filterStatus} setFilterStatus={setFilterStatus} sortKey={sortKey} setSortKey={setSortKey} isMobile={isMobile} />
+
+            {filtered.length === 0 ? (
+              loading ? <SkeletonCards /> : <EmptyState text="Koi lead nahi mili yahan." />
+            ) : (
+              <div style={isMobile ? S.cardGridMobile : S.cardGrid}>
+                {filtered.map((l, i) => (
+                  <LeadCardOD
+                    key={l.id} lead={l} index={i} me={me} agents={agents} waTemplate={settings.waTemplate}
+                    onOpen={() => setActiveLead(l)}
+                    onPatch={(patch) => updateLead(l.id, patch)}
+                    onGoNext={() => goNextAfter(l.id)}
+                    isLast={i === filtered.length - 1}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </main>
 
-      {isMobile && <MobileTabBar items={NAV} tab="mine" setTab={() => {}} onFab={null} />}
+      {isMobile && <MobileTabBar items={NAV} tab={tab} setTab={setTab} onFab={null} />}
 
       {activeLead && (
         <LeadDetailModal lead={leads.find((l) => l.id === activeLead.id) || activeLead} waTemplate={settings.waTemplate} me={me} isAgentView isMobile={isMobile} onClose={() => setActiveLead(null)} onUpdate={(patch) => updateLead(activeLead.id, patch)} onRemove={(reason) => removeLead(activeLead.id, reason)} />
+      )}
+    </div>
+  );
+}
+
+function HomeScreen({ me, mine, todayLeads, closed, onGo }) {
+  return (
+    <div className="k-fade-in">
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ fontFamily: FONT.display, fontSize: "clamp(20px,1.6vw,28px)", fontWeight: 700 }}>Hi, {me.name.split(" ")[0]} 👋</div>
+        <div style={{ fontSize: 13, color: T.mutedDim, marginTop: 4 }}>Yahan se apni leads ka overview dekho.</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <button className="k-card k-btn" style={S.homeStatCard} onClick={() => onGo("open")}>
+          <div><div style={S.homeStatNum}>{mine.length}</div><div style={S.homeStatLabel}>Total Leads</div></div>
+          <ChevronRight size={18} color={T.mutedDim} />
+        </button>
+        <button className="k-card k-btn" style={S.homeStatCard} onClick={() => onGo("today")}>
+          <div><div style={S.homeStatNum}>{todayLeads.length}</div><div style={S.homeStatLabel}>Today's Leads</div></div>
+          <ChevronRight size={18} color={T.mutedDim} />
+        </button>
+        <button className="k-card k-btn" style={S.homeStatCard} onClick={() => onGo("won")}>
+          <div><div style={S.homeStatNum}>{closed.length}</div><div style={S.homeStatLabel}>Archived (Won + Removed)</div></div>
+          <ChevronRight size={18} color={T.mutedDim} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FilterSortBar({ q, setQ, filterStatus, setFilterStatus, sortKey, setSortKey, isMobile }) {
+  return (
+    <div style={isMobile ? S.filterBarMobile : S.filterBar}>
+      <div style={S.searchBox}><Search size={15} color={T.mutedDim} /><input style={S.searchInput} placeholder="Search name, phone, project…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <select style={{ ...S.select, flex: 1 }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="all">All statuses</option>
+          {STATUS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+        <select style={{ ...S.select, flex: 1 }} value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
+          <option value="newest">Sort: Newest</option>
+          <option value="name">Sort: Name A-Z</option>
+          <option value="reminder">Sort: Reminder soonest</option>
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function CalendarPanel({ leads, onOpen, isMobile }) {
+  const [cursor, setCursor] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const year = cursor.getFullYear(), month = cursor.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const byDay = {};
+  leads.forEach((l) => {
+    if (!l.nextActivity?.at) return;
+    const d = new Date(l.nextActivity.at);
+    if (d.getFullYear() === year && d.getMonth() === month) {
+      const key = d.getDate();
+      (byDay[key] = byDay[key] || []).push(l);
+    }
+  });
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const selectedLeads = selectedDay ? (byDay[selectedDay] || []) : [];
+  const monthLabel = cursor.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+
+  return (
+    <div className="k-fade-in">
+      <div style={S.calHeader}>
+        <button className="k-icon-btn" style={S.iconBtn} onClick={() => { setCursor(new Date(year, month - 1, 1)); setSelectedDay(null); }}><ChevronLeft size={16} /></button>
+        <div style={{ fontFamily: FONT.display, fontWeight: 700, fontSize: 16 }}>{monthLabel}</div>
+        <button className="k-icon-btn" style={S.iconBtn} onClick={() => { setCursor(new Date(year, month + 1, 1)); setSelectedDay(null); }}><ChevronRight size={16} /></button>
+      </div>
+      <div style={S.calGrid}>
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} style={S.calDow}>{d}</div>)}
+        {cells.map((d, i) => {
+          const count = d ? (byDay[d] || []).length : 0;
+          const isToday_ = d && new Date().getDate() === d && new Date().getMonth() === month && new Date().getFullYear() === year;
+          return (
+            <button key={i} disabled={!d} onClick={() => setSelectedDay(d)} style={{ ...S.calCell, ...(d ? {} : { visibility: "hidden" }), ...(selectedDay === d ? S.calCellActive : {}), ...(isToday_ && selectedDay !== d ? S.calCellToday : {}) }}>
+              <span>{d}</span>
+              {count > 0 && <span style={S.calDot}>{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedDay && (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>{selectedDay} {monthLabel} — {selectedLeads.length} reminder{selectedLeads.length !== 1 ? "s" : ""}</div>
+          {selectedLeads.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: T.mutedDim }}>Is din koi reminder nahi hai.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {selectedLeads.sort((a, b) => a.nextActivity.at - b.nextActivity.at).map((l) => (
+                <div key={l.id} className="k-card" style={{ ...S.leadRow, cursor: "pointer" }} onClick={() => onOpen(l)}>
+                  <div style={S.rail} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={S.leadRowTop}><div><div style={S.leadName}>{l.name}</div><div style={S.leadPhone}>{l.phone}</div></div><span style={{ fontSize: 12, color: T.muted, fontWeight: 600 }}>{fmtShort(l.nextActivity.at)}</span></div>
+                    <div style={S.leadRowMeta}><span>{l.project}{l.sector ? ` · ${l.sector}` : ""}</span><span style={{ color: T.mutedDim }}>{ACTIVITY_TYPES.find((a) => a.id === l.nextActivity.type)?.label}</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -737,10 +947,10 @@ function LeadCardOD({ lead, index, me, agents, waTemplate, onOpen, onPatch, onGo
 
 
 /* ---------------- SHARED CHROME ---------------- */
-function Sidebar({ me, tab, setTab, onLogout, role, items }) {
+function Sidebar({ me, tab, setTab, onLogout, role, items, onLogoClick }) {
   return (
     <aside style={S.sidebar}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: onLogoClick ? "pointer" : "default" }} onClick={onLogoClick}>
         <Logo size={34} /><div><div style={S.brandTitleSm}>Keyzo</div><div style={S.brandSubSm}>{role}</div></div>
       </div>
       <nav style={{ marginTop: 40, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -754,10 +964,10 @@ function Sidebar({ me, tab, setTab, onLogout, role, items }) {
     </aside>
   );
 }
-function MobileHeader({ title, onLogout }) {
+function MobileHeader({ title, onLogout, onTitleClick }) {
   return (
     <header style={S.mobileHeader}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}><Logo size={28} /><div style={S.mobileHeaderTitle}>{title}</div></div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: onTitleClick ? "pointer" : "default" }} onClick={onTitleClick}><Logo size={28} /><div style={S.mobileHeaderTitle}>{title}</div></div>
       <button className="k-icon-btn" style={S.iconBtn} onClick={onLogout}><LogOut size={16} /></button>
     </header>
   );
@@ -844,6 +1054,51 @@ function BulkImportModal({ agents, onClose, onSubmit, isMobile }) {
       )}
 
       <button disabled={parsed.length === 0} style={{ ...S.primaryBtn, marginTop: 22, opacity: parsed.length ? 1 : 0.4 }} onClick={() => onSubmit(parsed, selected)}>Import {parsed.length || ""} Leads</button>
+    </ModalShell>
+  );
+}
+
+function DistributeModal({ agents, unassignedCount, onClose, onSubmit, isMobile }) {
+  const [counts, setCounts] = useState({});
+  const setCount = (username, val) => {
+    const n = Math.max(0, parseInt(val, 10) || 0);
+    setCounts((c) => ({ ...c, [username]: n }));
+  };
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const over = total > unassignedCount;
+  const valid = total > 0 && !over;
+
+  const submit = () => {
+    const assignments = agents.map((a) => ({ username: a.username, count: counts[a.username] || 0 })).filter((x) => x.count > 0);
+    onSubmit(assignments);
+  };
+
+  if (agents.length === 0) {
+    return (
+      <ModalShell title="Distribute Leads" onClose={onClose} isMobile={isMobile}>
+        <div style={{ fontSize: 13, color: T.mutedDim }}>Pehle Team tab se calling-team login banao, tab distribute kar paoge.</div>
+      </ModalShell>
+    );
+  }
+
+  return (
+    <ModalShell title="Distribute Unassigned Leads" onClose={onClose} isMobile={isMobile}>
+      <div style={{ fontSize: 12.5, color: T.muted, marginBottom: 16 }}>
+        Abhi <b>{unassignedCount}</b> leads unassigned hain. Har agent ke aage batao kitni chahiye — ye pehli {unassignedCount} leads se order me nikal ke assign ho jayengi, ek-ek karke click karne ki zaroorat nahi.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {agents.map((a) => (
+          <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={S.avatarCircle}>{a.name.slice(0, 1).toUpperCase()}</div>
+            <div style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{a.name}</div>
+            <input type="number" min="0" style={{ ...S.input, width: 90, textAlign: "center", minHeight: 40 }} value={counts[a.username] || ""} onChange={(e) => setCount(a.username, e.target.value)} placeholder="0" />
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 12.5, marginTop: 14, color: over ? T.danger : T.mutedDim, fontWeight: 600 }}>
+        Total: {total} / {unassignedCount} available{over ? " — itni leads nahi hain!" : ""}
+      </div>
+      <button disabled={!valid} className="k-btn" style={{ ...S.primaryBtn, opacity: valid ? 1 : 0.4 }} onClick={submit}>Distribute {total || ""} Leads</button>
     </ModalShell>
   );
 }
@@ -1184,12 +1439,12 @@ const T = {
   text: "#0A0A0A", muted: "#5C5C5C", mutedDim: "#9A9A9A", accent: "#FFD400",
   success: "#1F9254", warn: "#C77E12", danger: "#D8433C",
 };
-const FONT = { display: "'Space Grotesk', system-ui, sans-serif", body: "'Inter', system-ui, -apple-system, sans-serif", mono: "'JetBrains Mono', 'Courier New', monospace" };
+const FONT = { display: "'Sora', system-ui, sans-serif", body: "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif", mono: "'JetBrains Mono', 'Courier New', monospace" };
 
 function GlobalStyle() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
       * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
       body { margin: 0; }
       ::selection { background: ${T.accent}66; }
@@ -1238,7 +1493,7 @@ function GlobalStyle() {
 }
 
 const S = {
-  appShell: { minHeight: "100vh", background: T.bg, fontFamily: FONT.body, color: T.text, display: "flex", flexDirection: "column" },
+  appShell: { height: "100vh", background: T.bg, fontFamily: FONT.body, color: T.text, display: "flex", flexDirection: "column", overflow: "hidden" },
   loginWrap: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflowY: "auto" },
   loginCard: { width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "40px 32px", background: "#fff", border: `1.5px solid ${T.hairline}`, borderRadius: 20, boxShadow: "0 20px 60px rgba(0,0,0,.06)" },
   brandTitle: { fontFamily: FONT.display, fontWeight: 700, fontSize: 28, letterSpacing: -0.5, marginTop: 18 },
@@ -1254,9 +1509,9 @@ const S = {
   hint: { marginTop: 26, fontSize: 12, color: T.mutedDim, lineHeight: 1.7 },
   code: { background: T.panelAlt, padding: "1px 6px", borderRadius: 4, fontFamily: FONT.mono, color: T.text },
   toast: { position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", background: T.ink, color: "#fff", border: `1.5px solid ${T.accent}`, borderRadius: 999, padding: "10px 20px", fontSize: 13, boxShadow: "0 10px 30px rgba(0,0,0,.25)", zIndex: 60, whiteSpace: "nowrap" },
-  dashGrid: { display: "flex", flex: 1, minHeight: "100vh", width: "100%", justifyContent: "center" },
+  dashGrid: { display: "flex", flex: 1, height: "100%", width: "100%", justifyContent: "center", overflow: "hidden" },
   dashGridMobile: { display: "flex", flexDirection: "column", flex: 1, minHeight: "100vh" },
-  sidebar: { width: 232, background: T.ink, color: "#fff", padding: "28px 20px", display: "flex", flexDirection: "column" },
+  sidebar: { width: 232, height: "100%", flexShrink: 0, background: T.ink, color: "#fff", padding: "28px 20px", display: "flex", flexDirection: "column", overflowY: "auto" },
   navItem: { display: "flex", alignItems: "center", gap: 11, background: "none", border: "none", color: "#B5B5B5", padding: "11px 12px", borderRadius: 10, fontSize: 13.5, fontFamily: FONT.body, fontWeight: 500, cursor: "pointer", textAlign: "left" },
   navItemActive: { background: T.accent, color: T.ink, fontWeight: 700 },
   sidebarFooter: { marginTop: "auto", display: "flex", alignItems: "center", gap: 10, paddingTop: 18, borderTop: "1px solid #262626" },
@@ -1269,8 +1524,8 @@ const S = {
   mobileTabBar: { position: "sticky", bottom: 0, display: "flex", alignItems: "center", justifyContent: "space-around", background: T.ink, padding: "8px 8px calc(8px + env(safe-area-inset-bottom))", zIndex: 20 },
   mobileTabItem: { display: "flex", flexDirection: "column", alignItems: "center", background: "none", border: "none", padding: "6px 14px", cursor: "pointer", minWidth: 56 },
   fab: { position: "absolute", right: 16, top: -22, width: 48, height: 48, borderRadius: "50%", background: T.accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 20px rgba(255,212,0,.4)", cursor: "pointer" },
-  main: { flex: 1, padding: "30px 36px", overflowY: "auto", width: "100%", maxWidth: 1440, margin: "0 auto" },
-  mainMobile: { flex: 1, padding: "18px 16px 24px", overflowY: "auto", width: "100%" },
+  main: { flex: 1, height: "100%", padding: "30px 36px", overflowY: "auto", width: "100%", maxWidth: 1440, margin: "0 auto" },
+  mainMobile: { flex: 1, minHeight: 0, padding: "18px 16px 24px", overflowY: "auto", width: "100%" },
   topBar: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26, flexWrap: "wrap", gap: 10 },
   pageTitle: { fontFamily: FONT.display, fontSize: "clamp(20px, 1.6vw, 30px)", fontWeight: 700, margin: 0, letterSpacing: -0.3 },
   ctaBtn: { display: "flex", alignItems: "center", gap: 6, background: T.accent, color: T.ink, border: "none", borderRadius: 999, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
@@ -1296,6 +1551,8 @@ const S = {
   leadRowMeta: { display: "flex", justifyContent: "space-between", fontSize: 12.5, color: T.muted, marginTop: 5 },
   leadName: { fontSize: 15, fontWeight: 700, color: T.text },
   leadPhone: { fontFamily: FONT.mono, fontSize: 12, color: T.muted, marginTop: 2 },
+  credRow: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 },
+  credChip: { fontFamily: FONT.mono, fontSize: 11, background: T.panelAlt, border: `1px solid ${T.hairline}`, borderRadius: 6, padding: "3px 8px", color: T.text },
   pill: { fontSize: 10.5, fontWeight: 700, padding: "5px 11px", borderRadius: 999, border: "1.5px solid", whiteSpace: "nowrap", letterSpacing: 0.2 },
   tagChip: { fontSize: 10.5, fontWeight: 600, padding: "4px 9px", borderRadius: 999, background: T.ink, color: T.accent },
   assignSelect: { width: "100%", background: T.panelAlt, border: `1.5px solid ${T.hairline}`, borderRadius: 8, padding: "8px 10px", color: T.text, fontSize: 12.5, minHeight: 38 },
@@ -1320,6 +1577,16 @@ const S = {
   dotsItem: { display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", padding: "9px 10px", borderRadius: 8, fontSize: 13, fontWeight: 500, color: T.text, cursor: "pointer", textAlign: "left", width: "100%" },
   smallCtaBtn: { background: T.accent, color: T.ink, border: "none", borderRadius: 10, padding: "11px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", minHeight: 44, flexShrink: 0 },
   perfCard: { background: "#fff", border: `1.5px solid ${T.hairline}`, borderRadius: 16, padding: 18, boxShadow: "0 1px 3px rgba(0,0,0,.04)" },
+  homeStatCard: { display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", border: `1.5px solid ${T.hairline}`, borderRadius: 16, padding: "20px 22px", boxShadow: "0 1px 3px rgba(0,0,0,.04)", width: "100%", textAlign: "left", cursor: "pointer" },
+  homeStatNum: { fontFamily: FONT.display, fontSize: 28, fontWeight: 700, color: T.text },
+  homeStatLabel: { fontSize: 12.5, color: T.mutedDim, marginTop: 2 },
+  calHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 },
+  calGrid: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 },
+  calDow: { textAlign: "center", fontSize: 11, color: T.mutedDim, fontWeight: 700, padding: "4px 0" },
+  calCell: { position: "relative", aspectRatio: "1", background: T.panelAlt, border: `1.5px solid ${T.hairline}`, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600, cursor: "pointer", color: T.text },
+  calCellActive: { background: T.ink, color: "#fff", borderColor: T.ink },
+  calCellToday: { borderColor: T.accent, borderWidth: 2 },
+  calDot: { position: "absolute", bottom: 4, fontSize: 8.5, fontWeight: 800, background: T.accent, color: T.ink, borderRadius: 999, padding: "0 4px", minWidth: 12 },
   rankBadge: { width: 28, height: 28, borderRadius: "50%", background: T.panelAlt, border: `1.5px solid ${T.hairline}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 },
   rankGold: { background: "#FFD400", color: T.ink, border: "none" },
   rankSilver: { background: "#D9D9D9", color: T.ink, border: "none" },
