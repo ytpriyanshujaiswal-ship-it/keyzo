@@ -40,6 +40,7 @@ function writeDB(data) {
     db.users.push({
       id: "U-" + Date.now(),
       username: "login@proptech",
+      password: "Proptech1234",
       passwordHash: bcrypt.hashSync("Proptech1234", 10),
       role: "backend",
       name: "Backend Admin",
@@ -92,7 +93,7 @@ app.get("/api/agents", auth, (req, res) => {
 /* ---- Users (backend-only management) ---- */
 app.get("/api/users", auth, requireBackend, (req, res) => {
   const db = readDB();
-  res.json(db.users.map((u) => ({ id: u.id, username: u.username, role: u.role, name: u.name, createdAt: u.createdAt, active: u.active !== false })));
+  res.json(db.users.map((u) => ({ id: u.id, username: u.username, password: u.password || "", role: u.role, name: u.name, createdAt: u.createdAt, active: u.active !== false })));
 });
 
 app.post("/api/users", auth, requireBackend, (req, res) => {
@@ -107,6 +108,7 @@ app.post("/api/users", auth, requireBackend, (req, res) => {
   const u = {
     id: "U-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
     username,
+    password,
     passwordHash: bcrypt.hashSync(password, 10),
     role: "calling",
     name,
@@ -115,7 +117,7 @@ app.post("/api/users", auth, requireBackend, (req, res) => {
   };
   db.users.push(u);
   writeDB(db);
-  res.json({ id: u.id, username: u.username, role: u.role, name: u.name, createdAt: u.createdAt, active: true });
+  res.json({ id: u.id, username: u.username, password: u.password, role: u.role, name: u.name, createdAt: u.createdAt, active: true });
 });
 
 app.patch("/api/users/:id", auth, requireBackend, (req, res) => {
@@ -123,6 +125,10 @@ app.patch("/api/users/:id", auth, requireBackend, (req, res) => {
   const u = db.users.find((x) => x.id === req.params.id);
   if (!u) return res.status(404).json({ error: "Not found" });
   if (typeof req.body.active === "boolean") u.active = req.body.active;
+  if (req.body.password && String(req.body.password).length >= 4) {
+    u.password = req.body.password;
+    u.passwordHash = bcrypt.hashSync(req.body.password, 10);
+  }
   writeDB(db);
   res.json({ ok: true });
 });
@@ -131,7 +137,7 @@ app.patch("/api/users/:id", auth, requireBackend, (req, res) => {
 app.get("/api/leads", auth, (req, res) => {
   const db = readDB();
   if (req.user.role === "backend") return res.json(db.leads);
-  res.json(db.leads.filter((l) => l.assignedTo === req.user.username && !l.removed));
+  res.json(db.leads.filter((l) => l.assignedTo === req.user.username));
 });
 
 app.post("/api/leads", auth, requireBackend, (req, res) => {
