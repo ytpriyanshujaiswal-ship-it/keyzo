@@ -14,7 +14,7 @@ import {
    running at API_BASE.
 --------------------------------------------------------- */
 
-const API_BASE = "http://localhost:4000/api";
+const API_BASE = "https://keyzo-server.onrender.com/api";
 
 const STATUS = [
   { id: "new", label: "New", color: "#5B8DEF" },
